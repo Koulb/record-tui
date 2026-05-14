@@ -171,6 +171,65 @@ func ConvertSessionToStreamingHTML(sessionLogPath string, maxRows uint32) (strin
 	return outputPath, nil
 }
 
+// ConvertSessionToAnimatedHTML reads session.log plus session.timing and generates
+// an animated HTML replay with playback controls.
+func ConvertSessionToAnimatedHTML(sessionLogPath string) (string, error) {
+	return ConvertSessionToAnimatedHTMLWithCues(sessionLogPath, nil)
+}
+
+// ConvertSessionToAnimatedHTMLWithCues is like ConvertSessionToAnimatedHTML but
+// embeds authored speed/pause cues into the playback UI.
+func ConvertSessionToAnimatedHTMLWithCues(sessionLogPath string, cues []playback.AnimationCue) (string, error) {
+	if _, err := os.Stat(sessionLogPath); os.IsNotExist(err) {
+		return "", fmt.Errorf("session.log not found: %s", sessionLogPath)
+	}
+
+	sessionContent, err := logfile.ReadFile(sessionLogPath)
+	if err != nil {
+		return "", fmt.Errorf("cannot read session.log: %w", err)
+	}
+
+	timingPath := logfile.CompanionPath(sessionLogPath, ".timing")
+	timingBytes, err := os.ReadFile(timingPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("session.timing not found: %s", timingPath)
+		}
+		return "", fmt.Errorf("cannot read session.timing: %w", err)
+	}
+
+	frames, err := playback.BuildAnimationFrames(bytes.NewReader(timingBytes), sessionContent)
+	if err != nil {
+		return "", fmt.Errorf("failed to build animation frames: %w", err)
+	}
+	if len(frames) == 0 {
+		return "", fmt.Errorf("no animation frames generated from %s", timingPath)
+	}
+
+	var markers []playback.AnimationMarker
+	inputPath := logfile.CompanionPath(sessionLogPath, ".input")
+	if inputBytes, err := os.ReadFile(inputPath); err == nil {
+		markers, _ = playback.BuildAnimationMarkers(bytes.NewReader(timingBytes), inputBytes)
+	}
+
+	htmlContent, err := playback.RenderAnimatedHTML(frames, playback.AnimationOptions{
+		Title:   filepath.Base(sessionLogPath),
+		Markers: markers,
+		Cues:    cues,
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to generate animated HTML: %w", err)
+	}
+
+	outputPath := sessionLogPath + ".animated.html"
+	err = os.WriteFile(outputPath, []byte(htmlContent), 0644)
+	if err != nil {
+		return "", fmt.Errorf("failed to write animated HTML file: %w", err)
+	}
+
+	return outputPath, nil
+}
+
 // buildTOC attempts to build TOC entries from timing and input files alongside the session log.
 // Returns nil if timing or input files are not found or cannot be parsed.
 //

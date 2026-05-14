@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -125,4 +126,36 @@ func TestRecordSessionDetailed_ReturnCode(t *testing.T) {
 	}
 
 	t.Logf("✓ RecordSessionDetailed completed with exit code: %d", exitCode)
+}
+
+func TestRecordSessionWithTiming_CreatesLogTimingAndInput(t *testing.T) {
+	tmpDir := t.TempDir()
+	outputPath := filepath.Join(tmpDir, "session.log")
+	timingPath := filepath.Join(tmpDir, "session.timing")
+	inputPath := filepath.Join(tmpDir, "session.input")
+
+	err := RecordSessionWithTiming(outputPath, timingPath, []string{"printf", "animated"})
+	if err != nil {
+		t.Fatalf("RecordSessionWithTiming failed: %v", err)
+	}
+
+	logBytes, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("Failed to read session.log: %v", err)
+	}
+	if !strings.Contains(string(logBytes), "animated") {
+		t.Fatalf("session.log should contain command output, got %q", string(logBytes))
+	}
+
+	timingBytes, err := os.ReadFile(timingPath)
+	if err != nil {
+		t.Fatalf("Failed to read session.timing: %v", err)
+	}
+	if !strings.Contains(string(timingBytes), "O ") {
+		t.Fatalf("session.timing should contain output timing entries, got %q", string(timingBytes))
+	}
+
+	if _, err := os.Stat(inputPath); err != nil {
+		t.Fatalf("session.input should be created: %v", err)
+	}
 }

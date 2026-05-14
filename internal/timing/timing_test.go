@@ -96,10 +96,10 @@ func TestExtractCommands_SimpleCommand(t *testing.T) {
 	// Simulate: some output, then user types "ls\r", then output
 	entries := []Entry{
 		{Type: Output, Delay: 0.01, ByteCount: 20},  // prompt
-		{Type: Input, Delay: 0.5, ByteCount: 1},      // 'l'
-		{Type: Input, Delay: 0.1, ByteCount: 1},      // 's'
-		{Type: Input, Delay: 0.2, ByteCount: 1},      // '\r'
-		{Type: Output, Delay: 0.01, ByteCount: 100},   // command output
+		{Type: Input, Delay: 0.5, ByteCount: 1},     // 'l'
+		{Type: Input, Delay: 0.1, ByteCount: 1},     // 's'
+		{Type: Input, Delay: 0.2, ByteCount: 1},     // '\r'
+		{Type: Output, Delay: 0.01, ByteCount: 100}, // command output
 	}
 	inputContent := []byte("ls\r")
 
@@ -117,12 +117,12 @@ func TestExtractCommands_SimpleCommand(t *testing.T) {
 
 func TestExtractCommands_MultipleCommands(t *testing.T) {
 	entries := []Entry{
-		{Type: Output, Delay: 0.01, ByteCount: 20},   // prompt
-		{Type: Input, Delay: 0.5, ByteCount: 3},      // "ls\r"
-		{Type: Output, Delay: 0.01, ByteCount: 50},   // ls output
-		{Type: Output, Delay: 0.01, ByteCount: 20},   // next prompt
-		{Type: Input, Delay: 1.0, ByteCount: 9},      // "npm test\r"
-		{Type: Output, Delay: 0.01, ByteCount: 200},  // npm output
+		{Type: Output, Delay: 0.01, ByteCount: 20},  // prompt
+		{Type: Input, Delay: 0.5, ByteCount: 3},     // "ls\r"
+		{Type: Output, Delay: 0.01, ByteCount: 50},  // ls output
+		{Type: Output, Delay: 0.01, ByteCount: 20},  // next prompt
+		{Type: Input, Delay: 1.0, ByteCount: 9},     // "npm test\r"
+		{Type: Output, Delay: 0.01, ByteCount: 200}, // npm output
 	}
 	inputContent := []byte("ls\rnpm test\r")
 
@@ -174,6 +174,19 @@ func TestExtractCommands_FilterArrowKeys(t *testing.T) {
 	}
 }
 
+func TestExtractCommands_FilterTerminalOSCReplies(t *testing.T) {
+	inputContent := []byte("\x1b]10;rgb:cdcd/d6d6/f4f4\x1b\\\x1b]11;rgb:1e1e/1e1e/2e2e\x1b\\\r")
+	entries := []Entry{
+		{Type: Output, Delay: 0.01, ByteCount: 20},
+		{Type: Input, Delay: 0.5, ByteCount: len(inputContent)},
+	}
+
+	commands := ExtractCommands(entries, inputContent)
+	if len(commands) != 0 {
+		t.Fatalf("expected 0 commands (OSC replies filtered), got %d: %#v", len(commands), commands)
+	}
+}
+
 func TestExtractCommands_NoTerminator(t *testing.T) {
 	// Input without \r or \n is not a command (e.g., partial typing)
 	entries := []Entry{
@@ -191,8 +204,8 @@ func TestExtractCommands_NoTerminator(t *testing.T) {
 func TestExtractCommands_InterleavedIO(t *testing.T) {
 	// Real-world pattern: each keystroke is I(1 byte) followed by O(1 byte echo)
 	entries := []Entry{
-		{Type: Output, Delay: 0.01, ByteCount: 75},  // prompt
-		{Type: Input, Delay: 4.0, ByteCount: 1},     // 'l'
+		{Type: Output, Delay: 0.01, ByteCount: 75},   // prompt
+		{Type: Input, Delay: 4.0, ByteCount: 1},      // 'l'
 		{Type: Output, Delay: 0.001, ByteCount: 1},   // echo 'l'
 		{Type: Input, Delay: 0.1, ByteCount: 1},      // 's'
 		{Type: Output, Delay: 0.001, ByteCount: 1},   // echo 's'

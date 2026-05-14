@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/choonkeat/record-tui/internal/logfile"
+	"github.com/choonkeat/record-tui/playback"
 )
 
 // TestConvertSessionToHTML_WithSimpleSession tests conversion of a simple recorded session
@@ -304,6 +305,116 @@ func TestConvertSessionToHTML_WithoutTimingFiles(t *testing.T) {
 	// Should NOT have navigation when no timing files
 	if strings.Contains(htmlString, `id="nav-indicator"`) {
 		t.Error("HTML should NOT contain navigation when no timing files")
+	}
+}
+
+func TestConvertSessionToAnimatedHTML_WithTimingFile(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	sessionLogPath := filepath.Join(tmpDir, "session.log")
+	sessionContent := "Script started on Wed Dec 31 12:10:34 2025\n" +
+		"Command: bash\n" +
+		"hello\n" +
+		"Script done on Wed Dec 31 12:11:00 2025\n"
+	if err := os.WriteFile(sessionLogPath, []byte(sessionContent), 0644); err != nil {
+		t.Fatalf("Failed to create session.log: %v", err)
+	}
+
+	timingPath := filepath.Join(tmpDir, "session.timing")
+	timingContent := "O 0.100000 2\nO 0.200000 4\n"
+	if err := os.WriteFile(timingPath, []byte(timingContent), 0644); err != nil {
+		t.Fatalf("Failed to create session.timing: %v", err)
+	}
+
+	inputPath := filepath.Join(tmpDir, "session.input")
+	if err := os.WriteFile(inputPath, []byte("echo hello\r"), 0644); err != nil {
+		t.Fatalf("Failed to create session.input: %v", err)
+	}
+
+	htmlPath, err := ConvertSessionToAnimatedHTML(sessionLogPath)
+	if err != nil {
+		t.Fatalf("ConvertSessionToAnimatedHTML failed: %v", err)
+	}
+
+	expectedPath := sessionLogPath + ".animated.html"
+	if htmlPath != expectedPath {
+		t.Fatalf("output path = %q, want %q", htmlPath, expectedPath)
+	}
+
+	htmlBytes, err := os.ReadFile(htmlPath)
+	if err != nil {
+		t.Fatalf("Failed to read animated HTML: %v", err)
+	}
+	htmlString := string(htmlBytes)
+
+	for _, want := range []string{
+		"framesBase64",
+		"animationMarkers",
+		"id=\"animation-play\"",
+		"id=\"animation-speed\"",
+		"id=\"animation-timeline\"",
+	} {
+		if !strings.Contains(htmlString, want) {
+			t.Fatalf("animated HTML should contain %q", want)
+		}
+	}
+}
+
+func TestConvertSessionToAnimatedHTML_MissingTimingFile(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	sessionLogPath := filepath.Join(tmpDir, "session.log")
+	sessionContent := "Script started on Wed Dec 31 12:10:34 2025\n" +
+		"Command: bash\n" +
+		"hello\n" +
+		"Script done on Wed Dec 31 12:11:00 2025\n"
+	if err := os.WriteFile(sessionLogPath, []byte(sessionContent), 0644); err != nil {
+		t.Fatalf("Failed to create session.log: %v", err)
+	}
+
+	_, err := ConvertSessionToAnimatedHTML(sessionLogPath)
+	if err == nil {
+		t.Fatalf("expected missing timing file error")
+	}
+	if !strings.Contains(err.Error(), "session.timing not found") {
+		t.Fatalf("error = %v, want missing timing file message", err)
+	}
+}
+
+func TestConvertSessionToAnimatedHTMLWithCues_EmbedsCueLabels(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	sessionLogPath := filepath.Join(tmpDir, "session.log")
+	sessionContent := "Script started on Wed Dec 31 12:10:34 2025\n" +
+		"Command: bash\n" +
+		"hello\n" +
+		"Script done on Wed Dec 31 12:11:00 2025\n"
+	if err := os.WriteFile(sessionLogPath, []byte(sessionContent), 0644); err != nil {
+		t.Fatalf("Failed to create session.log: %v", err)
+	}
+
+	timingPath := filepath.Join(tmpDir, "session.timing")
+	if err := os.WriteFile(timingPath, []byte("O 0.100000 5\n"), 0644); err != nil {
+		t.Fatalf("Failed to create session.timing: %v", err)
+	}
+
+	htmlPath, err := ConvertSessionToAnimatedHTMLWithCues(sessionLogPath, []playback.AnimationCue{
+		{Label: "Focus on output", Timestamp: 0.1, Pause: 2},
+	})
+	if err != nil {
+		t.Fatalf("ConvertSessionToAnimatedHTMLWithCues failed: %v", err)
+	}
+
+	htmlBytes, err := os.ReadFile(htmlPath)
+	if err != nil {
+		t.Fatalf("Failed to read animated HTML: %v", err)
+	}
+	htmlString := string(htmlBytes)
+	if !strings.Contains(htmlString, "Focus on output") {
+		t.Fatalf("animated HTML should contain cue label")
+	}
+	if !strings.Contains(htmlString, "animationCues") {
+		t.Fatalf("animated HTML should contain cue data")
 	}
 }
 

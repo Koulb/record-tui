@@ -50,11 +50,15 @@ record-tui
 record-tui claude
 record-tui npm test
 record-tui sh -c "ls -la"
+
+# Record with animated playback controls
+record-tui -animated codex
 ```
 
 Files are saved to `~/.record-tui/YYYYMMDD-HHMMSS/`:
 - `session.log` — raw session file
 - `session.log.html` — standalone HTML with ANSI colors and terminal emulation
+- `session.log.animated.html` — animated HTML replay with play/pause, speed, scrubber, and markers (when `-animated` is used)
 - `session.log.pdf` — printable PDF (A4 landscape, requires `make install-pdf-tool`)
 
 Recording stops when:
@@ -67,6 +71,7 @@ The directory opens automatically in Finder when recording completes (unless ove
 
 - ✅ **One command**: Records and converts automatically
 - ✅ **Standalone HTML**: No external dependencies, works offline after generation
+- ✅ **Animated HTML**: Optional replay mode with play/pause, timeline scrubbing, and speed controls
 - ✅ **PDF export**: Generate printable PDFs via `make install-pdf-tool` (optional)
 - ✅ **Colors preserved**: Full ANSI color support (8 colors + bright variants)
 - ✅ **Auto-open**: Directory opens in Finder on completion
@@ -89,6 +94,12 @@ ls ~/.record-tui/
 
 # Open a specific session
 open ~/.record-tui/20251231-144256/session.log.html
+
+# Convert an existing timing-enabled recording to animated HTML
+record-tui -convert ~/.record-tui/20251231-144256/session.log -animated
+
+# Convert with authored speed/pause cues
+record-tui -convert session.log -animated -cues cues.json
 ```
 
 ## Library Usage
@@ -169,6 +180,48 @@ func main() {
 | Streaming (`RenderStreamingHTML`) | Any | No | Yes |
 
 Supports both macOS and Linux `script` command output formats.
+
+### Animated Mode
+
+Animated mode consumes timing data and emits output chunks with timestamps:
+
+```go
+package main
+
+import (
+    "bytes"
+    "os"
+
+    "github.com/choonkeat/record-tui/playback"
+)
+
+func main() {
+    session, _ := os.ReadFile("session.log")
+    timing, _ := os.ReadFile("session.timing")
+
+    frames, _ := playback.BuildAnimationFrames(
+        bytes.NewReader(timing),
+        session,
+        playback.AnimationBuildOptions{MaxFPS: 30},
+    )
+    html, _ := playback.RenderAnimatedHTML(frames, playback.AnimationOptions{
+        Title: "Codex Session",
+    })
+    os.WriteFile("session.animated.html", []byte(html), 0644)
+}
+```
+
+The CLI records timing itself for `record-tui -animated ...`; it also supports converting pre-existing `session.log` + `session.timing` files.
+
+Cue files let you speed through dull spans or pause at key moments:
+
+```json
+[
+  { "timestamp": 12.5, "speed": 5, "label": "Speed through install" },
+  { "timestamp": 48.0, "pause": 4, "label": "Focus on failing test" },
+  { "timestamp": 62.0, "speed": 1, "label": "Back to normal speed" }
+]
+```
 
 ## Development
 

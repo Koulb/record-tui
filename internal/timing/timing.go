@@ -43,6 +43,7 @@ type Entry struct {
 type Command struct {
 	Text             string // What the user typed (e.g., "npm test")
 	OutputByteOffset int    // Cumulative output bytes at the point this command was entered
+	Timestamp        float64
 }
 
 // Parse reads a timing file and returns structured entries.
@@ -135,12 +136,16 @@ func isDigit(b byte) bool {
 // across I/O pairs, splitting commands at \r or \n boundaries in the input stream.
 func ExtractCommands(entries []Entry, inputContent []byte) []Command {
 	var commands []Command
-	var inputOffset int    // position in inputContent
-	var outputOffset int   // cumulative output bytes
+	var inputOffset int  // position in inputContent
+	var outputOffset int // cumulative output bytes
+	var currentTime float64
 	var currentInput []byte // accumulating current command's input
 	var commandOutputOffset int
+	var commandTimestamp float64
 
 	for _, e := range entries {
+		currentTime += e.Delay
+
 		switch e.Type {
 		case Output:
 			outputOffset += e.ByteCount
@@ -148,6 +153,7 @@ func ExtractCommands(entries []Entry, inputContent []byte) []Command {
 		case Input:
 			if len(currentInput) == 0 {
 				commandOutputOffset = outputOffset
+				commandTimestamp = currentTime
 			}
 			end := inputOffset + e.ByteCount
 			if end > len(inputContent) {
@@ -159,7 +165,7 @@ func ExtractCommands(entries []Entry, inputContent []byte) []Command {
 					currentInput = append(currentInput, b)
 					// Split on \r or \n — this ends a command
 					if b == '\r' || b == '\n' {
-						cmd := finalizeCommand(currentInput, commandOutputOffset)
+						cmd := finalizeCommand(currentInput, commandOutputOffset, commandTimestamp)
 						if cmd != nil {
 							commands = append(commands, *cmd)
 						}
@@ -173,7 +179,7 @@ func ExtractCommands(entries []Entry, inputContent []byte) []Command {
 
 	// Handle trailing input (no terminator)
 	if len(currentInput) > 0 {
-		cmd := finalizeCommand(currentInput, commandOutputOffset)
+		cmd := finalizeCommand(currentInput, commandOutputOffset, commandTimestamp)
 		if cmd != nil {
 			commands = append(commands, *cmd)
 		}
@@ -184,7 +190,7 @@ func ExtractCommands(entries []Entry, inputContent []byte) []Command {
 
 // finalizeCommand processes accumulated input bytes into a Command.
 // Returns nil if the input should be filtered (control chars, arrows, etc.).
-func finalizeCommand(input []byte, outputOffset int) *Command {
+func finalizeCommand(input []byte, outputOffset int, timestamp float64) *Command {
 	// Must end with \r or \n to be a command
 	if len(input) == 0 {
 		return nil
@@ -229,6 +235,7 @@ func finalizeCommand(input []byte, outputOffset int) *Command {
 	return &Command{
 		Text:             text,
 		OutputByteOffset: outputOffset,
+		Timestamp:        timestamp,
 	}
 }
 
@@ -342,6 +349,8 @@ func stripEscapeSequences(s string) string {
 				cursor = start
 			} else if s[i] == 0x1b {
 				// Double ESC - don't consume the second ESC, let the loop handle it
+			} else if isStringSequenceIntroducer(s[i]) {
+				i = skipStringSequence(s, i+1)
 			} else {
 				// Other ESC + single char (e.g., ESC O for SS3) - skip
 				i++
@@ -421,6 +430,10 @@ func isOnlyEscapeSequences(s string) bool {
 				if i < len(s) {
 					i++
 				}
+			} else if i < len(s) && isStringSequenceIntroducer(s[i]) {
+				i = skipStringSequence(s, i+1)
+			} else if i < len(s) {
+				i++
 			}
 		} else if s[i] < 0x20 {
 			// Control character
@@ -431,4 +444,21 @@ func isOnlyEscapeSequences(s string) bool {
 		}
 	}
 	return true
+}
+
+func isStringSequenceIntroducer(b byte) bool {
+	return b == ']' || b == 'P' || b == '^' || b == '_' || b == 'X'
+}
+
+func skipStringSequence(s string, i int) int {
+	for i < len(s) {
+		if s[i] == '\a' {
+			return i + 1
+		}
+		if s[i] == 0x1b && i+1 < len(s) && s[i+1] == '\\' {
+			return i + 2
+		}
+		i++
+	}
+	return i
 }

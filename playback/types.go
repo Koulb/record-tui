@@ -23,6 +23,37 @@ type Options struct {
 	TOC        []TOCEntry // Optional table-of-contents entries for navigation
 }
 
+// AnimationBuildOptions controls how timing entries are collapsed into replay frames.
+type AnimationBuildOptions struct {
+	// MaxFPS limits frame count by batching output chunks closer together than
+	// 1/MaxFPS seconds. Use 0 to keep every output timing chunk as a frame.
+	MaxFPS float64
+}
+
+// AnimationMarker represents a clickable point on the animation timeline.
+type AnimationMarker struct {
+	Label     string  `json:"label"`
+	Timestamp float64 `json:"timestamp"`
+}
+
+// AnimationCue represents an authored playback action.
+// Speed changes playback speed from this point onward.
+// Pause stops at this point for the given number of seconds, then resumes.
+type AnimationCue struct {
+	Label     string  `json:"label,omitempty"`
+	Timestamp float64 `json:"timestamp"`
+	Speed     float64 `json:"speed,omitempty"`
+	Pause     float64 `json:"pause,omitempty"`
+}
+
+// AnimationOptions configures animated HTML rendering behavior.
+type AnimationOptions struct {
+	Title      string            // Page title (defaults to "Terminal" if empty)
+	FooterLink FooterLink        // Optional co-branding link in footer
+	Markers    []AnimationMarker // Optional command markers on the timeline
+	Cues       []AnimationCue    // Optional authored pauses/speed changes
+}
+
 // StreamingOptions configures streaming HTML rendering behavior.
 // Use this for large terminal recordings where embedding data in HTML causes slow loading.
 // The generated HTML fetches session data from DataURL and streams it to xterm.js.

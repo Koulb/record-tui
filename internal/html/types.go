@@ -17,3 +17,17 @@ type TOCEntry struct {
 	Label string `json:"label"` // What the user typed (e.g., "npm test")
 	Line  int    `json:"line"`  // Line number in the output (0-indexed)
 }
+
+// AnimationMarker represents a clickable point on the animation timeline.
+type AnimationMarker struct {
+	Label     string  `json:"label"`
+	Timestamp float64 `json:"timestamp"`
+}
+
+// AnimationCue represents an authored playback action.
+type AnimationCue struct {
+	Label     string  `json:"label,omitempty"`
+	Timestamp float64 `json:"timestamp"`
+	Speed     float64 `json:"speed,omitempty"`
+	Pause     float64 `json:"pause,omitempty"`
+}

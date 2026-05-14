@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -9,12 +10,20 @@ import (
 	"time"
 
 	"github.com/choonkeat/record-tui/internal/record"
+	"github.com/choonkeat/record-tui/playback"
 )
 
 func printUsage() {
 	fmt.Fprintf(os.Stderr, `Usage: record-tui [command ...]
 
 Start a terminal recording session and automatically convert to HTML.
+
+Flags:
+  -animated    Record timing data and generate animated HTML
+  -animate     Alias for -animated
+  -convert     Convert an existing session.log to HTML
+  -cues        JSON cue file for animated speed changes/pauses
+  -streaming   Generate streaming HTML in convert mode
 
 Arguments:
   [command ...]  Command to execute in the recorded session (optional)
@@ -23,6 +32,7 @@ Arguments:
 Examples:
   record-tui                  # Start interactive shell recording
   record-tui echo hello       # Record specific command
+  record-tui -animated codex  # Record Codex and generate animated HTML
   record-tui /bin/bash        # Record bash session
 `)
 }
@@ -81,14 +91,39 @@ func openRecordingDir(dir string) {
 func main() {
 	convertFlag := flag.String("convert", "", "Convert session.log to HTML (outputs <file>.html)")
 	streamingFlag := flag.Bool("streaming", false, "Generate streaming HTML instead (outputs <file>.streaming.html)")
+	animatedFlag := flag.Bool("animated", false, "Generate animated HTML with playback controls (outputs <file>.animated.html)")
+	animateFlag := flag.Bool("animate", false, "Alias for -animated")
+	cuesFlag := flag.String("cues", "", "JSON cue file for animated playback")
 	flag.Parse()
 	args := flag.Args()
+	animated := *animatedFlag || *animateFlag
+
+	if animated && *streamingFlag {
+		fmt.Fprintf(os.Stderr, "Error: -animated and -streaming cannot be used together\n")
+		os.Exit(1)
+	}
+	if *cuesFlag != "" && !animated {
+		fmt.Fprintf(os.Stderr, "Error: -cues requires -animated\n")
+		os.Exit(1)
+	}
+
+	var cues []playback.AnimationCue
+	if *cuesFlag != "" {
+		var err error
+		cues, err = loadAnimationCues(*cuesFlag)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: Cue file failed: %v\n", err)
+			os.Exit(1)
+		}
+	}
 
 	// Handle conversion mode
 	if *convertFlag != "" {
 		var htmlPath string
 		var err error
-		if *streamingFlag {
+		if animated {
+			htmlPath, err = record.ConvertSessionToAnimatedHTMLWithCues(*convertFlag, cues)
+		} else if *streamingFlag {
 			htmlPath, err = record.ConvertSessionToStreamingHTML(*convertFlag, 100000)
 		} else {
 			htmlPath, err = record.ConvertSessionToHTML(*convertFlag)
@@ -99,12 +134,14 @@ func main() {
 		}
 		fmt.Fprintf(os.Stderr, "✓ HTML generated: %s\n", htmlPath)
 
-		// Try to convert HTML to PDF if to-pdf tool is available
-		pdfPath := htmlPath[:len(htmlPath)-len(".html")] + ".pdf"
-		cmd := exec.Command("to-pdf", htmlPath, pdfPath)
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err == nil {
-			fmt.Fprintf(os.Stderr, "✓ PDF generated: %s\n", pdfPath)
+		if !animated {
+			// Try to convert HTML to PDF if to-pdf tool is available
+			pdfPath := htmlPath[:len(htmlPath)-len(".html")] + ".pdf"
+			cmd := exec.Command("to-pdf", htmlPath, pdfPath)
+			cmd.Stderr = os.Stderr
+			if err := cmd.Run(); err == nil {
+				fmt.Fprintf(os.Stderr, "✓ PDF generated: %s\n", pdfPath)
+			}
 		}
 		// Silently ignore if to-pdf not found or fails
 
@@ -122,10 +159,15 @@ func main() {
 	}
 
 	sessionLogPath := filepath.Join(recordingDir, "session.log")
+	sessionTimingPath := filepath.Join(recordingDir, "session.timing")
 
 	// Record the session
 	fmt.Fprintf(os.Stderr, "Recording started. Press Ctrl-D to exit.\n")
-	err = record.RecordSession(sessionLogPath, args)
+	if animated {
+		err = record.RecordSessionWithTiming(sessionLogPath, sessionTimingPath, args)
+	} else {
+		err = record.RecordSession(sessionLogPath, args)
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: Recording failed: %v\n", err)
 		os.Exit(1)
@@ -138,7 +180,12 @@ func main() {
 	}
 
 	// Convert session.log to HTML
-	htmlPath, err := record.ConvertSessionToHTML(sessionLogPath)
+	var htmlPath string
+	if animated {
+		htmlPath, err = record.ConvertSessionToAnimatedHTMLWithCues(sessionLogPath, cues)
+	} else {
+		htmlPath, err = record.ConvertSessionToHTML(sessionLogPath)
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: HTML conversion failed: %v\n", err)
 		fmt.Fprintf(os.Stderr, "Note: session.log was recorded successfully\n")
@@ -146,12 +193,14 @@ func main() {
 	} else {
 		fmt.Fprintf(os.Stderr, "✓ HTML generated: %s\n", htmlPath)
 
-		// Try to convert HTML to PDF if to-pdf tool is available
-		pdfPath := htmlPath[:len(htmlPath)-len(".html")] + ".pdf"
-		cmd := exec.Command("to-pdf", htmlPath, pdfPath)
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err == nil {
-			fmt.Fprintf(os.Stderr, "✓ PDF generated: %s\n", pdfPath)
+		if !animated {
+			// Try to convert HTML to PDF if to-pdf tool is available
+			pdfPath := htmlPath[:len(htmlPath)-len(".html")] + ".pdf"
+			cmd := exec.Command("to-pdf", htmlPath, pdfPath)
+			cmd.Stderr = os.Stderr
+			if err := cmd.Run(); err == nil {
+				fmt.Fprintf(os.Stderr, "✓ PDF generated: %s\n", pdfPath)
+			}
 		}
 		// Silently ignore if to-pdf not found or fails
 	}
@@ -163,4 +212,17 @@ func main() {
 	openRecordingDir(recordingDir)
 
 	os.Exit(0)
+}
+
+func loadAnimationCues(path string) ([]playback.AnimationCue, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("cannot read %s: %w", path, err)
+	}
+
+	var cues []playback.AnimationCue
+	if err := json.Unmarshal(content, &cues); err != nil {
+		return nil, fmt.Errorf("cannot parse %s: %w", path, err)
+	}
+	return cues, nil
 }
