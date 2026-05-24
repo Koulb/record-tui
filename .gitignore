@@ -1,5 +1,6 @@
 # Build artifacts
 bin/
+/record-tui-animated
 *.exe
 *.dll
 *.so
